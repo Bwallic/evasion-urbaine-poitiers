@@ -55,5 +55,5 @@
 
   setInterval(() => {
     maybeSendAutomaticPing().catch(() => {});
-  }, 5000);
+  }, 10000);
 })();
