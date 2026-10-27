@@ -12,7 +12,8 @@
     pings: [],
     participants: [],
     slots: [],
-    realtime: []
+    realtime: [],
+    refreshTimer: null
   };
 
   const $ = (id) => document.getElementById(id);
@@ -431,10 +432,18 @@
     }
   }
 
+  function scheduleRefreshAll(delay = 350) {
+    if (state.refreshTimer) clearTimeout(state.refreshTimer);
+    state.refreshTimer = setTimeout(() => {
+      state.refreshTimer = null;
+      refreshAll().catch(() => {});
+    }, delay);
+  }
+
   function subscribeRealtime() {
     unsubscribeRealtime();
     const pingsChannel = state.supabase.channel(`event-pings-${cfg.EVENT_ID}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "pings", filter: `event_id=eq.${cfg.EVENT_ID}` }, () => refreshAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "pings", filter: `event_id=eq.${cfg.EVENT_ID}` }, () => scheduleRefreshAll())
       .subscribe();
     const eventChannel = state.supabase.channel(`event-status-${cfg.EVENT_ID}`)
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "events", filter: `id=eq.${cfg.EVENT_ID}` }, (payload) => {
@@ -451,6 +460,10 @@
   }
 
   function unsubscribeRealtime() {
+    if (state.refreshTimer) {
+      clearTimeout(state.refreshTimer);
+      state.refreshTimer = null;
+    }
     if (!state.supabase) return;
     for (const channel of state.realtime) state.supabase.removeChannel(channel);
     state.realtime = [];
@@ -460,6 +473,8 @@
     unsubscribeRealtime();
     state.participant = null;
     state.selectedRole = null;
+    window.CHASSE_PARTICIPANT = null;
+    window.dispatchEvent(new CustomEvent("evasion:logout"));
     state.pingLayers.forEach((layer) => layer.remove());
     state.pingLayers.clear();
     $("gameView").classList.add("hidden");
