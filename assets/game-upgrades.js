@@ -918,7 +918,7 @@
 
   setInterval(setup,1000);
   setInterval(() => { renderGlobalTimer(); renderHunterDepartureTimer(); renderTargetCaptureCountdown(); },1000);
-  setInterval(refreshEventState,15000);
+  setInterval(refreshEventState,60000);
   setInterval(() => {
     if (document.hidden) return;
     const game = document.getElementById("gameView");
@@ -926,6 +926,5 @@
     if (participant?.role === "target") refreshTargetState();
     if (["target","hunter"].includes(participant?.role)) refreshVisibleTargetStates();
     if (participant?.role === "hunter") refreshHunterPings();
-    if (participant?.role === "organizer") refreshPlayerManager();
   },15000);
 })();
