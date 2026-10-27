@@ -16,7 +16,7 @@ Prototype V1 de l'application web mobile pour l'événement du 28 octobre 2026.
 - Realtime Supabase pour actualiser les pings et la zone active sur les autres téléphones.
 - Mode démo local pour tester l'interface sans backend.
 - Position personnelle en temps réel sur la carte pour Cibles et Chasseurs, uniquement en local sur leur appareil.
-- Timer général jusqu'à la fin de partie et fin automatique après les 2 heures, avec une courte grâce technique pour le Ping 13 final.
+- Timer général jusqu’à la fin de partie et fin automatique après les 2 heures.
 - États Cible : libre, en cours de capture, en prison, puis libérée.
 - Gestion des joueurs directement depuis l'espace Organisateur : ajout, modification, rôle, activation, code et libération d'appareil.
 - Révélation automatique de la zone d'extraction à START +80 minutes, avec notification push indiquant le nom de la zone.
@@ -30,7 +30,7 @@ Prototype V1 de l'application web mobile pour l'événement du 28 octobre 2026.
 - `data/areas.geojson` : géométries exactes extraites du KMZ.
 - `config.js` : configuration du site.
 - `supabase/schema.sql` : tables, RLS et fonctions serveur.
-- `supabase/seed-event.sql` : événement, zones et 7 créneaux de ping (Ping 0 à Ping 6).
+- `supabase/seed-event.sql` : événement, zones et créneaux de ping Cible.
 - `supabase/seed-participants-example.sql` : exemple de création de participants et codes.
 - `scripts/kmz_to_geojson.py` : conversion/reconstruction des zones depuis un KMZ.
 
@@ -78,7 +78,7 @@ Les vrais codes doivent rester dans Supabase. Ne pas committer un fichier conten
 
 ## Logique des pings
 
-La base utilise un Ping 0 au START, puis les pings Cibles à +20, +30, +40, +50, +60, +75, +90, +95, +100, +105, +110, +115 et +120 minutes. `sent_at` vient de l'horloge du serveur. Un ping est valide si son écart au créneau est inférieur ou égal à 60 secondes. Les pings hors fenêtre sont conservés et signalés à l'organisateur.
+La base utilise un Ping 0 au START, puis les pings Cibles à +20, +30, +40, +50, +60, +80, +95, +100, +105 et +110 minutes. Les pings +75, +90, +115 et +120 sont supprimés. Les Chasseurs ont trois pings obligatoires à +60, +95 et +110 minutes. `sent_at` vient de l’horloge du serveur. Un ping est valide si son écart au créneau est inférieur ou égal à 60 secondes. Les pings hors fenêtre sont conservés et signalés à l’organisateur.
 
 ## Zone d'extraction
 
