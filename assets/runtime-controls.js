@@ -455,5 +455,5 @@
 
     const hunterPanel = document.getElementById("hunterPanel");
     if (hunterPanel && !hunterPanel.classList.contains("hidden")) refreshHunterTiming();
-  }, 15000);
+  }, 30000);
 })();
