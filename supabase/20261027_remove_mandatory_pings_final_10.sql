@@ -1,0 +1,309 @@
+-- Évasion Urbaine — aucune obligation GPS pendant les 10 dernières minutes.
+-- Cibles : dernier ping obligatoire à START +105.
+-- Chasseurs : derniers pings obligatoires à START +60 et START +100.
+
+delete from public.hunter_required_pings
+where offset_minutes = 110;
+
+alter table public.hunter_required_pings
+  drop constraint if exists hunter_required_pings_offset_minutes_check;
+
+alter table public.hunter_required_pings
+  add constraint hunter_required_pings_offset_minutes_check
+  check (offset_minutes in (60,100));
+
+delete from public.push_jobs j
+using public.ping_slots s
+where j.slot_id=s.id
+  and s.event_id='11111111-1111-1111-1111-111111111111'
+  and s.ordinal >= 11;
+
+delete from public.ping_slots
+where event_id='11111111-1111-1111-1111-111111111111'
+  and ordinal >= 11;
+
+create or replace function public.ping_offset_minutes(p_ordinal integer)
+returns integer
+language sql
+immutable
+set search_path to 'public'
+as $function$
+  select case p_ordinal
+    when 0 then 0
+    when 1 then 20
+    when 2 then 30
+    when 3 then 40
+    when 4 then 50
+    when 5 then 60
+    when 6 then 75
+    when 7 then 90
+    when 8 then 95
+    when 9 then 100
+    when 10 then 105
+    else null
+  end
+$function$;
+
+create or replace function public.start_event_now()
+returns table(actual_started_at timestamptz, actual_ends_at timestamptz)
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_event_id uuid := public.my_event_id();
+  v_event public.events%rowtype;
+  v_now timestamptz := clock_timestamp();
+begin
+  if public.my_role() <> 'organizer' then raise exception 'Accès organisateur requis'; end if;
+
+  select e.* into v_event
+  from public.events e
+  where e.id=v_event_id
+  for update;
+
+  if v_event.id is null then raise exception 'Événement introuvable'; end if;
+
+  if v_event.actual_started_at is not null then
+    return query select v_event.actual_started_at, v_event.actual_ends_at;
+    return;
+  end if;
+
+  update public.ping_slots s
+     set scheduled_at=v_now + make_interval(mins => public.ping_offset_minutes(s.ordinal)),
+         label='Ping ' || s.ordinal::text
+   where s.event_id=v_event_id and s.ordinal between 0 and 10;
+
+  update public.events e
+     set actual_started_at=v_now,
+         actual_ends_at=v_now + interval '120 minutes',
+         status='live',
+         active_extraction_key=null
+   where e.id=v_event_id;
+
+  delete from public.push_jobs where event_id=v_event_id;
+
+  insert into public.push_jobs(event_id,slot_id,scheduled_at)
+  select s.event_id,s.id,s.scheduled_at
+  from public.ping_slots s
+  where s.event_id=v_event_id and s.ordinal between 0 and 10
+  order by s.ordinal;
+
+  perform public.dispatch_due_push_jobs();
+
+  return query select v_now, v_now + interval '120 minutes';
+end;
+$function$;
+
+create or replace function public.reset_event_start()
+returns boolean
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_event_id uuid := public.my_event_id();
+  v_starts_at timestamptz;
+begin
+  if public.my_role() <> 'organizer' then raise exception 'Accès organisateur requis'; end if;
+  select starts_at into v_starts_at from public.events where id=v_event_id;
+  if v_starts_at is null then raise exception 'Événement introuvable'; end if;
+
+  delete from public.push_jobs where event_id=v_event_id;
+  update public.events
+     set actual_started_at=null,actual_ends_at=null,status='scheduled'
+   where id=v_event_id;
+
+  update public.ping_slots
+     set scheduled_at=v_starts_at + make_interval(mins => public.ping_offset_minutes(ordinal)),
+         label='Ping ' || ordinal::text
+   where event_id=v_event_id and ordinal between 0 and 10;
+
+  return true;
+end;
+$function$;
+
+create or replace function public.reset_party()
+returns boolean
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_event_id uuid := public.my_event_id();
+  v_starts_at timestamptz;
+begin
+  if public.my_role() <> 'organizer' then raise exception 'Accès organisateur requis'; end if;
+  select starts_at into v_starts_at from public.events where id=v_event_id;
+  if v_starts_at is null then raise exception 'Événement introuvable'; end if;
+
+  delete from public.push_jobs where event_id=v_event_id;
+  delete from public.pings where event_id=v_event_id;
+  delete from public.hunter_pings where event_id=v_event_id;
+  delete from public.hunter_required_pings where event_id=v_event_id;
+
+  update public.participants
+     set play_state='free',play_state_updated_at=null
+   where event_id=v_event_id;
+
+  update public.ping_slots
+     set scheduled_at=v_starts_at + make_interval(mins => public.ping_offset_minutes(ordinal)),
+         label='Ping ' || ordinal::text
+   where event_id=v_event_id and ordinal between 0 and 10;
+
+  update public.events
+     set actual_started_at=null,actual_ends_at=null,active_extraction_key=null,status='scheduled'
+   where id=v_event_id;
+
+  return true;
+end;
+$function$;
+
+create or replace function public.my_required_hunter_ping_status()
+returns table(event_status text, scheduled_at timestamptz, sent_at timestamptz, sent boolean)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_participant public.participants%rowtype;
+  v_event public.events%rowtype;
+  v_offset integer;
+  v_due timestamptz;
+  v_sent timestamptz;
+  v_now timestamptz := clock_timestamp();
+  v_count integer := 0;
+begin
+  select p.* into v_participant
+  from public.participants p
+  where p.user_id=auth.uid() and p.active=true
+  limit 1;
+
+  if v_participant.id is null or v_participant.role <> 'hunter' then
+    raise exception 'Accès réservé aux Chasseurs';
+  end if;
+
+  select e.* into v_event
+  from public.events e
+  where e.id=v_participant.event_id;
+
+  if v_event.actual_started_at is null then
+    return query select v_event.status, null::timestamptz, null::timestamptz, false;
+    return;
+  end if;
+
+  foreach v_offset in array array[60,100]
+  loop
+    v_sent := null;
+    select hp.sent_at into v_sent
+    from public.hunter_required_pings hp
+    where hp.event_id=v_participant.event_id
+      and hp.participant_id=v_participant.id
+      and hp.offset_minutes=v_offset
+    limit 1;
+
+    if v_sent is not null then
+      continue;
+    end if;
+
+    v_due := v_event.actual_started_at + make_interval(mins => v_offset);
+
+    if v_now <= v_due + interval '60 seconds' then
+      return query select v_event.status, v_due, null::timestamptz, false;
+      return;
+    end if;
+  end loop;
+
+  select count(*), max(hp.sent_at)
+    into v_count, v_sent
+  from public.hunter_required_pings hp
+  where hp.event_id=v_participant.event_id
+    and hp.participant_id=v_participant.id
+    and hp.offset_minutes in (60,100);
+
+  if v_count = 2 then
+    return query
+    select v_event.status,
+           v_event.actual_started_at + interval '100 minutes',
+           v_sent,
+           true;
+  else
+    return query
+    select v_event.status,
+           null::timestamptz,
+           null::timestamptz,
+           false;
+  end if;
+end;
+$function$;
+
+create or replace function public.submit_required_hunter_ping(
+  p_lat double precision,
+  p_lng double precision,
+  p_accuracy_m double precision default null::double precision
+)
+returns table(id uuid, sent_at timestamptz, delta_seconds integer)
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_participant public.participants%rowtype;
+  v_event public.events%rowtype;
+  v_now timestamptz := clock_timestamp();
+  v_due timestamptz;
+  v_offset integer;
+  v_delta integer;
+  v_ping public.hunter_required_pings%rowtype;
+begin
+  select p.* into v_participant
+  from public.participants p
+  where p.user_id=auth.uid() and p.active=true
+  limit 1;
+
+  if v_participant.id is null or v_participant.role <> 'hunter' then
+    raise exception 'Accès réservé aux Chasseurs';
+  end if;
+
+  select e.* into v_event
+  from public.events e
+  where e.id=v_participant.event_id;
+
+  if v_event.status <> 'live' or v_event.actual_started_at is null then
+    raise exception 'La partie n''a pas démarré';
+  end if;
+
+  select c.offset_minutes, c.due_at,
+         abs(extract(epoch from (v_now - c.due_at)))::integer
+    into v_offset, v_due, v_delta
+  from (
+    select x.offset_minutes,
+           v_event.actual_started_at + make_interval(mins => x.offset_minutes) as due_at
+    from (values (60),(100)) as x(offset_minutes)
+  ) c
+  where abs(extract(epoch from (v_now - c.due_at))) <= 60
+  order by abs(extract(epoch from (v_now - c.due_at)))
+  limit 1;
+
+  if v_offset is null then
+    raise exception 'Aucun ping obligatoire Chasseur n''est disponible actuellement';
+  end if;
+
+  insert into public.hunter_required_pings(
+    event_id, participant_id, offset_minutes, lat, lng, accuracy_m, sent_at
+  )
+  values(
+    v_participant.event_id, v_participant.id, v_offset,
+    p_lat, p_lng, p_accuracy_m, v_now
+  )
+  on conflict(event_id,participant_id,offset_minutes) do update
+    set lat=excluded.lat,
+        lng=excluded.lng,
+        accuracy_m=excluded.accuracy_m,
+        sent_at=excluded.sent_at
+  returning * into v_ping;
+
+  return query select v_ping.id, v_ping.sent_at, v_delta;
+end;
+$function$;
