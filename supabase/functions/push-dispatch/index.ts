@@ -108,6 +108,137 @@ Deno.serve(async (req: Request) => {
     if (!requestToken || requestToken !== tokenRow?.value) return json({ error: "Unauthorized" }, 401);
 
     const { privateJwk } = await ensureVapid(supabase);
+
+    if (body?.mode === "prisoner") {
+      const eventId = String(body?.eventId || "");
+      const prisonerId = String(body?.participantId || "");
+      const prisonerPseudo = String(body?.pseudo || "").trim();
+      if (!eventId || !prisonerId || !prisonerPseudo) return json({ error: "Missing prisoner payload" }, 400);
+
+      const { data: participants, error: participantsError } = await supabase
+        .from("participants")
+        .select("id,pseudo,role")
+        .eq("event_id", eventId)
+        .eq("active", true)
+        .in("role", ["target", "hunter"])
+        .neq("id", prisonerId);
+      if (participantsError) throw participantsError;
+
+      const participantIds = (participants ?? []).map((p: any) => p.id);
+      let subscriptions: any[] = [];
+      if (participantIds.length) {
+        const { data, error } = await supabase
+          .from("push_subscriptions")
+          .select("participant_id,endpoint,p256dh,auth")
+          .in("participant_id", participantIds);
+        if (error) throw error;
+        subscriptions = data ?? [];
+      }
+
+      const subs = new Map(subscriptions.map((s: any) => [s.participant_id, s]));
+      const results: any[] = [];
+      for (const participant of participants ?? []) {
+        const subscription: any = subs.get(participant.id);
+        if (!subscription) {
+          results.push({ participantId: participant.id, status: "no_subscription" });
+          continue;
+        }
+
+        const payload = JSON.stringify({
+          title: "Cible en prison",
+          body: `${prisonerPseudo} est maintenant en prison.`,
+          tag: `prisoner-${prisonerId}`,
+          url: "./"
+        });
+
+        try {
+          await send(
+            { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
+            payload,
+            {
+              vapid: privateJwk,
+              subscriber: "https://bwallic.github.io/evasion-urbaine-poitiers/",
+              ttl: 1800,
+              urgency: "high",
+              topic: `prisoner-${prisonerId}`,
+            }
+          );
+          results.push({ participantId: participant.id, status: "sent" });
+        } catch (error: any) {
+          results.push({ participantId: participant.id, status: "failed", error: String(error?.message ?? error) });
+          if (error?.permanent || error?.statusCode === 404 || error?.statusCode === 410) {
+            await supabase.from("push_subscriptions").delete().eq("participant_id", participant.id);
+          }
+        }
+      }
+
+      return json({ ok: true, mode: "prisoner", prisonerPseudo, results });
+    }
+
+    if (body?.mode === "extraction") {
+      const eventId = String(body?.eventId || "");
+      const zoneName = String(body?.zoneName || "").trim();
+      if (!eventId || !zoneName) return json({ error: "Missing extraction payload" }, 400);
+
+      const { data: participants, error: participantsError } = await supabase
+        .from("participants")
+        .select("id,pseudo,role")
+        .eq("event_id", eventId)
+        .eq("active", true)
+        .in("role", ["target", "hunter"]);
+      if (participantsError) throw participantsError;
+
+      const participantIds = (participants ?? []).map((p: any) => p.id);
+      let subscriptions: any[] = [];
+      if (participantIds.length) {
+        const { data, error } = await supabase
+          .from("push_subscriptions")
+          .select("participant_id,endpoint,p256dh,auth")
+          .in("participant_id", participantIds);
+        if (error) throw error;
+        subscriptions = data ?? [];
+      }
+
+      const subs = new Map(subscriptions.map((s: any) => [s.participant_id, s]));
+      const results: any[] = [];
+      for (const participant of participants ?? []) {
+        const subscription: any = subs.get(participant.id);
+        if (!subscription) {
+          results.push({ participantId: participant.id, status: "no_subscription" });
+          continue;
+        }
+
+        const payload = JSON.stringify({
+          title: "Zone d’extraction",
+          body: `Zone d’extraction tirée : ${zoneName}`,
+          tag: `extraction-${eventId}`,
+          url: "./"
+        });
+
+        try {
+          await send(
+            { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
+            payload,
+            {
+              vapid: privateJwk,
+              subscriber: "https://bwallic.github.io/evasion-urbaine-poitiers/",
+              ttl: 1800,
+              urgency: "high",
+              topic: "extraction-zone",
+            }
+          );
+          results.push({ participantId: participant.id, status: "sent" });
+        } catch (error: any) {
+          results.push({ participantId: participant.id, status: "failed", error: String(error?.message ?? error) });
+          if (error?.permanent || error?.statusCode === 404 || error?.statusCode === 410) {
+            await supabase.from("push_subscriptions").delete().eq("participant_id", participant.id);
+          }
+        }
+      }
+
+      return json({ ok: true, mode: "extraction", zoneName, results });
+    }
+
     const { data: jobs, error: jobsError } = await supabase.rpc("claim_due_push_jobs");
     if (jobsError) throw jobsError;
 
@@ -125,22 +256,32 @@ Deno.serve(async (req: Request) => {
         const participantIds = (participants ?? []).map((p: any) => p.id);
         let subscriptions: any[] = [];
         let alreadySent: any[] = [];
+        let existingDeliveries: any[] = [];
         if (participantIds.length) {
-          const [subsRes, pingsRes] = await Promise.all([
+          const [subsRes, pingsRes, deliveriesRes] = await Promise.all([
             supabase.from("push_subscriptions").select("participant_id,endpoint,p256dh,auth").in("participant_id", participantIds),
             supabase.from("pings").select("participant_id").eq("slot_id", job.slot_id).in("participant_id", participantIds),
+            supabase.from("push_deliveries").select("participant_id,status").eq("job_id", job.id).in("participant_id", participantIds),
           ]);
           if (subsRes.error) throw subsRes.error;
           if (pingsRes.error) throw pingsRes.error;
+          if (deliveriesRes.error) throw deliveriesRes.error;
           subscriptions = subsRes.data ?? [];
           alreadySent = pingsRes.data ?? [];
+          existingDeliveries = deliveriesRes.data ?? [];
         }
 
         const subscriptionsByParticipant = new Map(subscriptions.map((s: any) => [s.participant_id, s]));
         const sentTargets = new Set(alreadySent.map((p: any) => p.participant_id));
+        const deliveryStatusByParticipant = new Map(existingDeliveries.map((d: any) => [d.participant_id, d.status]));
         let failures = 0;
 
         for (const participant of participants ?? []) {
+          const previousDeliveryStatus = deliveryStatusByParticipant.get(participant.id);
+          if (["sent", "clicked", "skipped", "no_subscription"].includes(previousDeliveryStatus)) {
+            continue;
+          }
+
           if (participant.role === "target" && sentTargets.has(participant.id)) {
             await supabase.from("push_deliveries").upsert({ job_id: job.id, participant_id: participant.id, status: "skipped", updated_at: new Date().toISOString() }, { onConflict: "job_id,participant_id" });
             continue;
@@ -154,19 +295,27 @@ Deno.serve(async (req: Request) => {
 
           const isControl = slot.ordinal === 0;
           const isTarget = participant.role === "target";
-          const title = isControl ? "Ping 0 — Contrôle départ" : `${slot.label} — Chasse Urbaine`;
+          const hunterRequiredOffset = participant.role === "hunter"
+            ? ({ 5: 60, 7: 95, 10: 110 } as Record<number, number>)[slot.ordinal]
+            : undefined;
+          const isHunterRequired = hunterRequiredOffset !== undefined;
+          const title = isHunterRequired
+            ? `PING CHASSEUR OBLIGATOIRE — +${hunterRequiredOffset}`
+            : (isControl ? "Ping 0 — Contrôle départ" : `${slot.label} — Évasion Urbaine`);
           const bodyText = isTarget
             ? (isControl ? "Touchez pour valider votre position de départ." : "Touchez pour ouvrir l'application et envoyer votre position.")
-            : (isControl ? "Ouvrez l'application pour vérifier les positions de départ des Cibles." : "De nouvelles positions des Cibles vont être envoyées.");
+            : (isHunterRequired
+                ? "Ouvrez l'application et envoyez votre position. Ce ping sera visible par tous les joueurs et l'Organisateur."
+                : (isControl ? "Ouvrez l'application pour vérifier les positions de départ des Cibles." : "De nouvelles positions des Cibles vont être envoyées."));
 
           const query = new URLSearchParams({ pushJob: job.id, slot: String(slot.ordinal) });
           if (isTarget) query.set("pingAction", "1");
-          const payload = JSON.stringify({ title, body: bodyText, tag: `chasse-${job.id}`, jobId: job.id, slotOrdinal: slot.ordinal, url: `?${query.toString()}` });
+          const payload = JSON.stringify({ title, body: bodyText, tag: `evasion-${job.id}`, jobId: job.id, slotOrdinal: slot.ordinal, url: `?${query.toString()}` });
 
           try {
             await send({ endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } }, payload, {
               vapid: privateJwk,
-              subscriber: "https://bwallic.github.io/chasse-urbaine-poitiers/",
+              subscriber: "https://bwallic.github.io/evasion-urbaine-poitiers/",
               ttl: isControl ? 300 : 900,
               urgency: "high",
               topic: `ping-${slot.ordinal}`,
@@ -179,8 +328,33 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        await supabase.from("push_jobs").update({ status: "sent", sent_at: new Date().toISOString(), locked_at: null, last_error: failures ? `${failures} envoi(s) en erreur` : null }).eq("id", job.id);
-        results.push({ jobId: job.id, sent: true, failures });
+        let retryPending = false;
+        if (failures > 0) {
+          const { data: jobState } = await supabase
+            .from("push_jobs")
+            .select("attempt_count")
+            .eq("id", job.id)
+            .single();
+          retryPending = Number(jobState?.attempt_count ?? 1) < 3;
+        }
+
+        if (retryPending) {
+          await supabase.from("push_jobs").update({
+            status: "pending",
+            locked_at: null,
+            sent_at: null,
+            last_error: `${failures} envoi(s) en erreur · nouvelle tentative prévue`
+          }).eq("id", job.id);
+        } else {
+          await supabase.from("push_jobs").update({
+            status: "sent",
+            sent_at: new Date().toISOString(),
+            locked_at: null,
+            last_error: failures ? `${failures} envoi(s) en erreur après 3 tentatives` : null
+          }).eq("id", job.id);
+        }
+
+        results.push({ jobId: job.id, sent: !retryPending, failures, retryPending });
       } catch (error: any) {
         await supabase.from("push_jobs").update({ status: "pending", locked_at: null, last_error: String(error?.message ?? error).slice(0, 500) }).eq("id", job.id);
         results.push({ jobId: job.id, sent: false, error: String(error?.message ?? error) });
