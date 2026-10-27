@@ -163,7 +163,7 @@
         <button id="resetExtractionBtn" class="ghost">RESET ZONE D'EXTRACTION</button>
         <button id="resetPartyBtn" class="ghost">RESET PARTIE</button>
       </div>
-      <p class="muted compact">START enregistre l'heure réelle du départ. Départ des Chasseurs à +10 min. Pings Cibles : START/Ping 0, puis +20 / +30 / +40 / +50 / +60 / +80 / +95 / +100 / +105 / +110 min. Les pings +75, +90, +115 et +120 sont supprimés. Après +110, aucun autre ping obligatoire jusqu’à la fin. La zone d'extraction est tirée et révélée automatiquement à START +80 min, soit 40 minutes avant la fin. RESET START remet seulement le départ à zéro. RESET PARTIE efface les pings de test, la zone active et le départ, mais conserve les participants, leurs pseudos et leurs codes.</p>
+      <p class="muted compact">START enregistre l'heure réelle du départ. Départ des Chasseurs à +10 min. Pings Cibles : START/Ping 0, puis +20 / +30 / +40 / +50 / +60 / +80 / +95 / +100 / +105 / +110 min. Après +110, aucun autre ping obligatoire jusqu’à la fin. La zone d'extraction est tirée et révélée automatiquement à START +80 min, soit 40 minutes avant la fin. RESET START remet seulement le départ à zéro. RESET PARTIE efface les pings de test, la zone active et le départ, mais conserve les participants, leurs pseudos et leurs codes.</p>
     `;
 
     const firstDivider = panel.querySelector(".divider");
