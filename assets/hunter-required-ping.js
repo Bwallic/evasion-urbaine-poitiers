@@ -67,7 +67,7 @@
 
   function slotLabel(offset) {
     if (offset === 60) return "PING +60 · MI-PARCOURS";
-    if (offset === 100) return "PING · 20 MIN AVANT LA FIN";
+    if (offset === 95) return "PING +95 · 25 MIN AVANT LA FIN";
     if (offset === 110) return "PING · 10 MIN AVANT LA FIN";
     return "PROCHAIN PING CHASSEUR OBLIGATOIRE";
   }
@@ -82,7 +82,7 @@
     box.innerHTML = `
       <span class="eyebrow">PING CHASSEUR OBLIGATOIRE</span>
       <div id="hunterRequiredPingMain" class="hunter-required-main">En attente du START</div>
-      <small id="hunterRequiredPingSub" class="muted">Pings obligatoires à +60 min, 20 min avant la fin et 10 min avant la fin.</small>
+      <small id="hunterRequiredPingSub" class="muted">Pings obligatoires à +60 min, +95 min et +110 min.</small>
       <button id="sendRequiredHunterPingBtn" class="primary small" disabled>ENVOYER LE PING OBLIGATOIRE</button>
     `;
 
@@ -105,7 +105,7 @@
 
     if (!statusRow || statusRow.event_status === "scheduled") {
       main.textContent = "EN ATTENTE DU START";
-      sub.textContent = "Pings obligatoires à +60 min, 20 min avant la fin et 10 min avant la fin.";
+      sub.textContent = "Pings obligatoires à +60 min, +95 min et +110 min.";
       return;
     }
 
