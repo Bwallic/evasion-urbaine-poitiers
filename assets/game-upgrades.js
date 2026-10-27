@@ -16,6 +16,12 @@
   let targetCountdownTriggered = false;
   const hunterPingLayers = new Map();
 
+  const TEAM_COLORS = {
+    Alpha: "#3b82f6",
+    Beta: "#f59e0b",
+    Omega: "#a855f7"
+  };
+
   const style = document.createElement("style");
   style.textContent = `
     .global-game-timer,
@@ -61,8 +67,8 @@
     }
     .hunter-ping-dot {
       width: 20px; height: 20px; border-radius: 50%;
-      background: #ff3b3b; border: 3px solid #fff;
-      box-shadow: 0 0 0 5px rgba(255,59,59,.22);
+      background: var(--hunter-team-color, #ff3b3b); border: 3px solid #fff;
+      box-shadow: 0 0 0 5px rgba(255,255,255,.14), 0 0 16px var(--hunter-team-color, #ff3b3b);
     }
     .hunter-ping-control {
       margin: 10px 0 14px;
@@ -74,7 +80,27 @@
     .hunter-ping-control .hunter-ping-button {
       width: 100%;
       margin-top: 8px;
-      border-color: rgba(255,59,59,.55);
+      border-color: rgba(255,255,255,.3);
+    }
+    .hunter-team-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+      font-size: .78rem;
+    }
+    .hunter-team-key {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .hunter-team-key::before {
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--hunter-team-color);
+      box-shadow: 0 0 8px var(--hunter-team-color);
     }
     .organizer-player-manager .manager-form,
     .organizer-player-manager .player-editor { display: grid; gap: 8px; }
@@ -146,6 +172,10 @@
     }
   `;
   document.head.appendChild(style);
+
+  function teamColor(team) {
+    return TEAM_COLORS[team] || "#ff3b3b";
+  }
 
   function escapeHtml(value) {
     return String(value ?? "").replace(/[&<>'"]/g, (c) => ({
@@ -353,14 +383,22 @@
     const panel = document.getElementById("hunterPanel");
     if (!panel || document.getElementById("hunterPingControl")) return;
 
+    const team = participant?.team || "";
+    const color = teamColor(team);
     const box = document.createElement("div");
     box.id = "hunterPingControl";
     box.className = "hunter-ping-control";
+    box.style.borderColor = color;
     box.innerHTML =
       '<span class="eyebrow">PING CHASSEUR</span>' +
       '<div class="big-status">Partager ma position aux Chasseurs</div>' +
-      '<button id="sendHunterPingBtn" class="ghost hunter-ping-button">ENVOYER UN PING ROUGE</button>' +
-      '<small id="hunterPingMessage" class="muted">À volonté après le départ des Chasseurs. Visible uniquement par les Chasseurs.</small>';
+      '<button id="sendHunterPingBtn" class="ghost hunter-ping-button">ENVOYER UN PING D\'ÉQUIPE</button>' +
+      '<small id="hunterPingMessage" class="muted">À volonté après le départ. Visible uniquement par les Chasseurs.</small>' +
+      '<div class="hunter-team-legend">' +
+        '<span class="hunter-team-key" style="--hunter-team-color:#3b82f6">Alpha</span>' +
+        '<span class="hunter-team-key" style="--hunter-team-color:#f59e0b">Beta</span>' +
+        '<span class="hunter-team-key" style="--hunter-team-color:#a855f7">Omega</span>' +
+      '</div>';
 
     const anchor = panel.querySelector(".divider") || panel.firstElementChild;
     if (anchor) panel.insertBefore(box, anchor);
@@ -396,7 +434,8 @@
 
       const row = Array.isArray(data) ? data[0] : data;
       const time = row?.sent_at ? new Date(row.sent_at) : new Date();
-      message.textContent = "Ping rouge envoyé à " + time.toLocaleTimeString("fr-FR", {hour:"2-digit",minute:"2-digit",second:"2-digit"}) + ".";
+      const team = participant?.team ? " · équipe " + participant.team : "";
+      message.textContent = "Ping d'équipe envoyé à " + time.toLocaleTimeString("fr-FR", {hour:"2-digit",minute:"2-digit",second:"2-digit"}) + team + ".";
       await refreshHunterPings();
     } catch (e) {
       message.textContent = e.message || "Impossible d'envoyer le ping.";
@@ -410,36 +449,47 @@
     const map = window.CHASSE_MAP;
     if (!map || !window.L) return;
 
-    const { data, error } = await client().rpc("visible_hunter_pings");
-    if (error) return;
+    const [pingsRes, teamsRes] = await Promise.all([
+      client().rpc("visible_hunter_pings"),
+      client().from("participants")
+        .select("id,team")
+        .eq("event_id", cfg.EVENT_ID)
+        .eq("role", "hunter")
+        .eq("active", true)
+    ]);
+    if (pingsRes.error) return;
 
-    const rows = data || [];
+    const teamById = new Map((teamsRes.data || []).map((row) => [row.id, row.team || ""]));
+    const rows = pingsRes.data || [];
     const seen = new Set();
 
     rows.forEach((row) => {
       seen.add(row.participant_id);
       const latlng = [row.lat, row.lng];
+      const team = teamById.get(row.participant_id) || "";
+      const color = teamColor(team);
+      const icon = L.divIcon({
+        className: "",
+        html: '<div class="hunter-ping-dot" style="--hunter-team-color:' + color + '"></div>',
+        iconSize: [20,20],
+        iconAnchor: [10,10]
+      });
       let layer = hunterPingLayers.get(row.participant_id);
 
       if (!layer) {
-        const icon = L.divIcon({
-          className: "",
-          html: '<div class="hunter-ping-dot"></div>',
-          iconSize: [20,20],
-          iconAnchor: [10,10]
-        });
         layer = L.marker(latlng,{icon,zIndexOffset:1400}).addTo(map);
         hunterPingLayers.set(row.participant_id, layer);
       } else {
         layer.setLatLng(latlng);
+        layer.setIcon(icon);
       }
 
       const ageSeconds = Math.max(0, Math.round((Date.now() - new Date(row.sent_at).getTime()) / 1000));
       const age = ageSeconds < 60 ? ageSeconds + " s" : Math.floor(ageSeconds / 60) + " min";
-      layer.bindTooltip(row.pseudo + " · ping chasseur · " + age, {
-        direction:"top",
-        className:"map-label"
-      });
+      layer.bindTooltip(
+        row.pseudo + " · " + (team || "Chasseur") + " · ping · " + age,
+        { direction:"top", className:"map-label" }
+      );
     });
 
     hunterPingLayers.forEach((layer, participantId) => {
