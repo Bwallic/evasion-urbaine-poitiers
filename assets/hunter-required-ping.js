@@ -282,7 +282,17 @@
   window.addEventListener("focus", refreshVisibleState);
   window.addEventListener("evasion:event-updated", refreshVisibleState);
 
+  window.addEventListener("evasion:logout", () => {
+    participant = null;
+    statusRow = null;
+    initialized = false;
+    teamCacheAt = 0;
+    teamByParticipant.clear();
+    layers.forEach((marker) => marker.remove());
+    layers.clear();
+  });
+
   setInterval(setup, 1000);
   setInterval(renderStatus, 1000);
-  setInterval(refreshVisibleState, 5000);
+  setInterval(refreshVisibleState, 15000);
 })();
