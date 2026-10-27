@@ -6,22 +6,33 @@
   let statusRow = null;
   let busy = false;
   let initialized = false;
+  let teamCacheAt = 0;
+  const teamByParticipant = new Map();
   const layers = new Map();
+
+  const TEAM_COLORS = {
+    Alpha: "#3b82f6",
+    Beta: "#f59e0b",
+    Omega: "#a855f7"
+  };
 
   const style = document.createElement("style");
   style.textContent = `
     .hunter-required-box {
       margin: 10px 0 14px;
       padding: 12px;
-      border: 1px solid rgba(255,86,86,.45);
+      border: 1px solid rgba(255,255,255,.18);
       border-radius: 10px;
-      background: rgba(255,86,86,.07);
+      background: rgba(255,255,255,.045);
     }
     .hunter-required-main { font-size: 1.15rem; font-weight: 850; margin-top: 3px; }
     .hunter-required-marker {
-      width: 22px; height: 22px; border-radius: 50%;
-      background: #ff5656; border: 4px double #fff;
-      box-shadow: 0 0 0 5px rgba(255,86,86,.26);
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--hunter-team-color, #ff5656);
+      border: 4px double #fff;
+      box-shadow: 0 0 0 5px rgba(255,255,255,.16), 0 0 16px var(--hunter-team-color, #ff5656);
     }
   `;
   document.head.appendChild(style);
@@ -35,6 +46,32 @@
     return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
   }
 
+  function teamColor(team) {
+    return TEAM_COLORS[team] || "#ff5656";
+  }
+
+  function slotOffsetMinutes() {
+    if (!statusRow?.scheduled_at) return null;
+    const due = new Date(statusRow.scheduled_at).getTime();
+    const event = window.CHASSE_EVENT_STATE || {};
+
+    if (event.actual_started_at) {
+      return Math.round((due - new Date(event.actual_started_at).getTime()) / 60000);
+    }
+    if (event.actual_ends_at) {
+      const minutesBeforeEnd = Math.round((new Date(event.actual_ends_at).getTime() - due) / 60000);
+      return 120 - minutesBeforeEnd;
+    }
+    return null;
+  }
+
+  function slotLabel(offset) {
+    if (offset === 60) return "PING +60 · MI-PARCOURS";
+    if (offset === 100) return "PING · 20 MIN AVANT LA FIN";
+    if (offset === 110) return "PING · 10 MIN AVANT LA FIN";
+    return "PROCHAIN PING CHASSEUR OBLIGATOIRE";
+  }
+
   function injectHunterControl() {
     const panel = document.getElementById("hunterPanel");
     if (!panel || document.getElementById("hunterRequiredPingBox")) return;
@@ -43,9 +80,9 @@
     box.id = "hunterRequiredPingBox";
     box.className = "hunter-required-box";
     box.innerHTML = `
-      <span class="eyebrow">PING CHASSEUR OBLIGATOIRE · +60 MIN</span>
+      <span class="eyebrow">PING CHASSEUR OBLIGATOIRE</span>
       <div id="hunterRequiredPingMain" class="hunter-required-main">En attente du START</div>
-      <small id="hunterRequiredPingSub" class="muted">Ce ping sera visible par les Cibles, les Chasseurs et l'Organisateur.</small>
+      <small id="hunterRequiredPingSub" class="muted">Pings obligatoires à +60 min, puis 20 min et 10 min avant la fin.</small>
       <button id="sendRequiredHunterPingBtn" class="primary small" disabled>ENVOYER LE PING OBLIGATOIRE</button>
     `;
 
@@ -64,16 +101,25 @@
     if (!main || !sub || !btn) return;
 
     btn.disabled = true;
+    btn.textContent = "ENVOYER LE PING OBLIGATOIRE";
 
-    if (!statusRow || statusRow.event_status === "scheduled" || !statusRow.scheduled_at) {
+    if (!statusRow || statusRow.event_status === "scheduled") {
       main.textContent = "EN ATTENTE DU START";
-      sub.textContent = "Le ping sera demandé exactement à +60 min.";
+      sub.textContent = "Pings obligatoires à +60 min, puis 20 min et 10 min avant la fin.";
       return;
     }
 
     if (statusRow.sent) {
-      main.textContent = "PING +60 ENVOYÉ";
-      sub.textContent = "Position obligatoire partagée avec tous les joueurs et l'Organisateur.";
+      main.textContent = "3/3 PINGS OBLIGATOIRES ENVOYÉS";
+      sub.textContent = "Les trois positions obligatoires ont été partagées avec tous les joueurs et l'Organisateur.";
+      return;
+    }
+
+    if (!statusRow.scheduled_at) {
+      main.textContent = statusRow.event_status === "finished"
+        ? "PARTIE TERMINÉE"
+        : "PING(S) OBLIGATOIRE(S) MANQUÉ(S)";
+      sub.textContent = "Une ou plusieurs fenêtres obligatoires n'ont pas été validées.";
       return;
     }
 
@@ -83,22 +129,24 @@
       return;
     }
 
+    const offset = slotOffsetMinutes();
     const diff = new Date(statusRow.scheduled_at).getTime() - Date.now();
+    const label = slotLabel(offset);
 
     if (diff > 60000) {
-      main.textContent = "DANS " + fmt(diff);
-      sub.textContent = "Ouverture de la fenêtre d'envoi à +59 min.";
+      main.textContent = `${label} · DANS ${fmt(diff)}`;
+      sub.textContent = "La fenêtre d'envoi s'ouvre 60 secondes avant l'heure prévue.";
       return;
     }
 
     if (diff >= -60000) {
-      main.textContent = diff >= 0 ? "DANS " + fmt(diff) : "À ENVOYER MAINTENANT";
-      sub.textContent = "Fenêtre obligatoire : +60 min ±60 secondes.";
+      main.textContent = diff >= 0 ? `${label} · DANS ${fmt(diff)}` : `${label} · À ENVOYER MAINTENANT`;
+      sub.textContent = "Fenêtre obligatoire : ±60 secondes. Visible par les Cibles, les Chasseurs et l'Organisateur.";
       btn.disabled = false;
       return;
     }
 
-    main.textContent = "PING +60 MANQUÉ";
+    main.textContent = `${label} · MANQUÉ`;
     sub.textContent = "La fenêtre d'envoi est dépassée.";
   }
 
@@ -145,35 +193,56 @@
     }
   }
 
+  async function refreshTeamCache(force = false) {
+    if (!client()) return;
+    if (!force && teamByParticipant.size && Date.now() - teamCacheAt < 60000) return;
+
+    const { data, error } = await client()
+      .from("participants")
+      .select("id,team")
+      .eq("event_id", cfg.EVENT_ID)
+      .eq("role", "hunter")
+      .eq("active", true);
+
+    if (error) return;
+    teamByParticipant.clear();
+    (data || []).forEach((row) => teamByParticipant.set(row.id, row.team || ""));
+    teamCacheAt = Date.now();
+  }
+
   async function refreshVisiblePings() {
     if (!participant || !client()) return;
     const map = window.CHASSE_MAP;
     if (!map || !window.L) return;
 
+    await refreshTeamCache();
     const { data, error } = await client().rpc("visible_required_hunter_pings");
     if (error) return;
 
     const seen = new Set();
     for (const row of data || []) {
       seen.add(row.participant_id);
-      let marker = layers.get(row.participant_id);
+      const team = teamByParticipant.get(row.participant_id) || "";
+      const color = teamColor(team);
       const latlng = [row.lat, row.lng];
+      const icon = L.divIcon({
+        className: "",
+        html: `<div class="hunter-required-marker" style="--hunter-team-color:${color}"></div>`,
+        iconSize: [22,22],
+        iconAnchor: [11,11]
+      });
 
+      let marker = layers.get(row.participant_id);
       if (!marker) {
-        const icon = L.divIcon({
-          className: "",
-          html: '<div class="hunter-required-marker"></div>',
-          iconSize: [22,22],
-          iconAnchor: [11,11]
-        });
         marker = L.marker(latlng, { icon, zIndexOffset: 1450 }).addTo(map);
         layers.set(row.participant_id, marker);
       } else {
         marker.setLatLng(latlng);
+        marker.setIcon(icon);
       }
 
       marker.bindTooltip(
-        row.pseudo + " · Ping Chasseur obligatoire +60",
+        `${row.pseudo} · ${team || "Chasseur"} · Ping obligatoire`,
         { direction: "top", className: "map-label" }
       );
     }
@@ -195,6 +264,7 @@
 
     if (!initialized) {
       initialized = true;
+      refreshTeamCache(true);
       refreshVisiblePings();
       if (participant.role === "hunter") refreshStatus();
     }
@@ -210,6 +280,7 @@
     if (!document.hidden) refreshVisibleState();
   });
   window.addEventListener("focus", refreshVisibleState);
+  window.addEventListener("evasion:event-updated", refreshVisibleState);
 
   setInterval(setup, 1000);
   setInterval(renderStatus, 1000);
