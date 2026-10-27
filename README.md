@@ -78,7 +78,7 @@ Les vrais codes doivent rester dans Supabase. Ne pas committer un fichier conten
 
 ## Logique des pings
 
-La base utilise un Ping 0 au START, puis les pings Cibles à +20, +30, +40, +50, +60, +80, +95, +100, +105 et +110 minutes. Les pings +75, +90, +115 et +120 sont supprimés. Les Chasseurs ont trois pings obligatoires à +60, +95 et +110 minutes. `sent_at` vient de l’horloge du serveur. Un ping est valide si son écart au créneau est inférieur ou égal à 60 secondes. Les pings hors fenêtre sont conservés et signalés à l’organisateur.
+La base utilise un Ping 0 au START, puis les pings Cibles à +20, +30, +40, +50, +60, +80, +95, +100, +105 et +110 minutes. Les Chasseurs ont trois pings obligatoires à +60, +95 et +110 minutes. `sent_at` vient de l’horloge du serveur. Un ping est valide si son écart au créneau est inférieur ou égal à 60 secondes. Les pings hors fenêtre sont conservés et signalés à l’organisateur.
 
 ## Zone d'extraction
 
