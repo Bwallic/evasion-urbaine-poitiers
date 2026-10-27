@@ -337,5 +337,5 @@
   window.addEventListener("focus", refreshVisibleNotificationUI);
 
   refreshVisibleNotificationUI();
-  setInterval(refreshVisibleNotificationUI, 10000);
+  setInterval(refreshVisibleNotificationUI, 30000);
 })();
