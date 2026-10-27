@@ -294,7 +294,7 @@
     const remaining = new Date(eventState.actual_ends_at).getTime() - Date.now();
     if (remaining <= 0) {
       main.textContent = "00:00:00";
-      sub.textContent = "Fin de partie · Ping 13 final encore disponible pendant 60 secondes.";
+      sub.textContent = "Fin de partie · aucun ping obligatoire pendant les 10 dernières minutes.";
       showFinishedBanner();
     } else {
       main.textContent = formatDuration(remaining);
