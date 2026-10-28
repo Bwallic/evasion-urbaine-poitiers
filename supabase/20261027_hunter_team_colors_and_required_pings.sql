@@ -1,5 +1,5 @@
 -- Évasion Urbaine — pings Chasseurs obligatoires multiples et conservation des équipes.
--- Les pings obligatoires sont prévus à START +60, +100 (20 min avant la fin)
+-- Les pings obligatoires sont prévus à START +60, +95 (25 min avant la fin)
 -- et +110 (10 min avant la fin), avec une tolérance de ±60 secondes.
 
 alter table public.hunter_required_pings
@@ -21,7 +21,7 @@ alter table public.hunter_required_pings
 
 alter table public.hunter_required_pings
   add constraint hunter_required_pings_offset_minutes_check
-  check (offset_minutes in (60,100,110));
+  check (offset_minutes in (60,95,110));
 
 alter table public.hunter_required_pings
   drop constraint if exists hunter_required_pings_event_participant_offset_key;
@@ -70,7 +70,7 @@ begin
     return;
   end if;
 
-  foreach v_offset in array array[60,100,110]
+  foreach v_offset in array array[60,95,110]
   loop
     v_sent := null;
     select hp.sent_at into v_sent
@@ -98,7 +98,7 @@ begin
   from public.hunter_required_pings hp
   where hp.event_id=v_participant.event_id
     and hp.participant_id=v_participant.id
-    and hp.offset_minutes in (60,100,110);
+    and hp.offset_minutes in (60,95,110);
 
   if v_count = 3 then
     return query
@@ -158,7 +158,7 @@ begin
   from (
     select x.offset_minutes,
            v_event.actual_started_at + make_interval(mins => x.offset_minutes) as due_at
-    from (values (60),(100),(110)) as x(offset_minutes)
+    from (values (60),(95),(110)) as x(offset_minutes)
   ) c
   where abs(extract(epoch from (v_now - c.due_at))) <= 60
   order by abs(extract(epoch from (v_now - c.due_at)))
@@ -297,3 +297,4 @@ exception
     raise exception 'Pseudo ou code déjà utilisé';
 end;
 $function$;
+
