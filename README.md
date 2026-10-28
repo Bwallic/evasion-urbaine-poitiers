@@ -29,7 +29,8 @@ Prototype V1 de l'application web mobile pour l'événement du 28 octobre 2026.
 - `assets/styles.css` : interface sombre.
 - `data/areas.geojson` : géométries exactes extraites du KMZ.
 - `config.js` : configuration du site.
-- `supabase/schema.sql` : tables, RLS et fonctions serveur.
+- `supabase/schema.sql` : installation consolidée pour une base neuve (tables, RLS, fonctions, Realtime et tâches planifiées).
+- `supabase/migrations/` : historique des mises à jour des bases existantes.
 - `supabase/seed-event.sql` : événement, zones et créneaux de ping Cible.
 - `supabase/seed-participants-example.sql` : exemple de création de participants et codes.
 - `scripts/kmz_to_geojson.py` : conversion/reconstruction des zones depuis un KMZ.
@@ -52,42 +53,18 @@ La géolocalisation du navigateur fonctionne normalement en HTTPS. `localhost` e
 
 1. Créer un projet Supabase.
 2. Dans l'éditeur SQL Supabase, exécuter `supabase/schema.sql`.
-3. Exécuter `supabase/seed-event.sql`, puis les correctifs dans l’ordre indiqué ci-dessous. Le schéma de base et le seed seuls ne suffisent pas aux écrans actuels.
+3. Exécuter `supabase/seed-event.sql`. Le schéma consolidé contient déjà les fonctions des écrans actuels.
 4. Activer les connexions anonymes dans Authentication > Providers > Anonymous.
 5. Créer les vrais participants et leurs codes sur le modèle de `seed-participants-example.sql`.
 6. Dans `config.js`, renseigner `SUPABASE_URL` et `SUPABASE_ANON_KEY`, puis mettre `DEMO_MODE: false`.
 
-Pour une **nouvelle base**, après `schema.sql` et `seed-event.sql`, exécuter les fichiers suivants dans cet ordre (chemins relatifs à `supabase/`) :
+Pour une **nouvelle base**, `schema.sql` contient maintenant les tables, les définitions finales des fonctions, les droits, le Realtime et les quatre tâches planifiées. Exécuter `schema.sql`, puis `seed-event.sql` : aucune série de correctifs historiques n’est nécessaire. Ce fichier d’installation est réservé à une base neuve ; ne pas le réexécuter sur une partie existante.
 
-```text
-migrations/20260928_fix_claim_participant_digest_search_path.sql
-20260929_runtime_controls.sql
-20260929_testing_resets_countdown.sql
-20260929_fix_claim_conflict_and_ping_ambiguity.sql
-20260929_push_notifications_ping0.sql
-20260929_push_notifications_security.sql
-20260929_access_reset_controls.sql
-20260929_auto_reconnect.sql
-20260929_total_test_reset.sql
-20260929_fix_total_reset_pseudo_conflict.sql
-20260929_hunter_countdown_ping_labels.sql
-20261004_post_beta_upgrades.sql
-20261004_share_target_states.sql
-20261004_hunter_voluntary_pings.sql
-20261004_notify_prisoner.sql
-20261027_hunter_team_colors_and_required_pings.sql
-20261004_restrict_player_rpcs.sql
-20261004_stability_indexes.sql
-20261007_auto_reveal_extraction_at_start_plus_80.sql
-20261027_final_cleanup.sql
-migrations/20261028142527_reconcile_confirmed_ping_schedule.sql
-```
+Pour une **base existante déjà équipée des correctifs de production**, appliquer uniquement `migrations/20261028144510_reconcile_confirmed_ping_schedule.sql`. Cette migration a été appliquée au projet de production le 28 octobre 2026. Elle reste conservée pour tracer et reproduire la mise à jour. Elle exige une partie en attente du START et refuse de déplacer des créneaux avec des positions Cibles ou de réinterpréter d’anciennes positions Chasseurs à +100. Ne pas relancer le seed sur une partie démarrée.
 
-Les anciens correctifs d’intervalles à 20/30 minutes et de planning irrégulier ne font pas partie de ce parcours. `20261027_remove_mandatory_pings_final_10.sql` est désormais un fichier obsolète sans effet : les obligations à +110 sont bien conservées.
+Les anciens correctifs SQL datés à la racine de `supabase/` ont été intégrés au schéma consolidé puis supprimés. Leur historique reste disponible dans Git. Les migrations restent dans `supabase/migrations/` ; elles ne constituent pas à elles seules un installateur de base neuve.
 
-Pour une **base existante déjà équipée des correctifs de production**, appliquer uniquement `migrations/20261028142527_reconcile_confirmed_ping_schedule.sql` en dernier. Modifier un ancien fichier SQL dans GitHub ne met pas à jour les fonctions déjà installées en base. Le correctif exige une partie en attente du START ; il restaure les onze créneaux et les fonctions START/RESET, ainsi que les trois obligations Chasseurs. Il refuse de déplacer des créneaux avec des positions Cibles enregistrées ou de réinterpréter d’anciennes positions Chasseurs à +100. Dans ce cas, examiner les données et, uniquement s’il s’agit de tests à effacer, utiliser RESET PARTIE avant de réappliquer le correctif. Ne pas réexécuter le seed sur une partie démarrée.
-
-Les notifications exigent aussi le déploiement de `supabase/functions/push-dispatch/index.ts`, sa configuration VAPID et le secret de dispatch. Le contrôle ci-dessus ne déploie pas la fonction Edge. Vérifier les jobs `chasse_push_dispatch` et `evasion_extraction_reveal` dans `cron.job`.
+Les notifications exigent aussi le déploiement de `supabase/functions/push-dispatch/index.ts`, sa configuration VAPID et le secret de dispatch. Vérifier les jobs `chasse_push_dispatch`, `evasion_extraction_reveal`, `evasion_finish_events` et `evasion_capture_release` dans `cron.job`.
 
 L'anon key Supabase peut être présente dans une application web publique : la protection repose sur les règles RLS. Ne jamais mettre la `service_role` key dans ce dépôt.
 
@@ -125,7 +102,7 @@ La base utilise **11 créneaux Cibles** : Ping 0 au START, puis +20, +30, +40, +
 
 Les pings volontaires Chasseurs restent distincts : disponibles à partir de +10, ils sont visibles uniquement par les Chasseurs. Les pings obligatoires sont visibles par tous. L’envoi obligatoire Chasseur se fait au bouton dans `assets/hunter-required-ping.js` ; les pings volontaires sont gérés par `assets/game-upgrades.js`. Le compte à rebours Chasseur de `runtime-controls.js` annonce l’arrivée des prochains pings **Cibles** ; son bloc obligatoire possède son propre compte à rebours.
 
-Pour vérifier le correctif localement : `npm ci`, puis `npm test`. Les tests de planning exécutent les fonctions SQL dans PostgreSQL embarqué (PGlite), sans connexion à la base de production. Ils ne remplacent pas un essai GPS et push sur téléphone.
+Pour vérifier le correctif localement : `npm ci`, puis `npm test`. Les tests de planning installent le schéma consolidé et exécutent les fonctions SQL dans PostgreSQL embarqué (PGlite), sans connexion à la base de production. Ils ne remplacent pas un essai GPS et push sur téléphone.
 
 ## Zone d'extraction
 

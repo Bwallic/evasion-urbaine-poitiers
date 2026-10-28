@@ -1,5 +1,0 @@
--- OBSOLÈTE : ce script ne doit plus supprimer les obligations des 10 dernières minutes.
--- Règle confirmée : Cibles à +20/+30/+40/+50/+60/+80/+95/+100/+105/+110,
--- plus Ping 0 au START ; Chasseurs à +60/+95/+110.
--- Aucun changement volontairement. Pour réparer une base existante, appliquer
--- migrations/20261028142527_reconcile_confirmed_ping_schedule.sql en dernier.

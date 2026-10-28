@@ -35,22 +35,29 @@ before(async () => {
     grant usage on schema auth to authenticated;
     grant execute on function auth.uid() to authenticated;
   `);
-  await db.exec(read('supabase/schema.sql')
-    .replace('create extension if not exists pgcrypto;', '')
-    .split('\ndo $$')[0]);
-  await db.exec(`alter table public.events add column actual_started_at timestamptz,
-    add column actual_ends_at timestamptz;`);
-  const pushSource = read('supabase/20260929_push_notifications_ping0.sql');
-  await db.exec(pushSource.slice(pushSource.indexOf('create table if not exists public.push_jobs ('),
-    pushSource.indexOf('alter table public.push_jobs enable')));
-  await db.exec(`create function public.dispatch_due_push_jobs() returns void
-    language sql as $$ select null::void $$;
-    create table public.push_subscriptions(participant_id uuid references public.participants(id));`);
+  // Only hosted services are stubbed; all application tables, RPCs, RLS,
+  // publication changes, token initialization and cron setup run from schema.sql.
+  await db.exec(`
+    create schema extensions; create schema net; create schema cron;
+    create publication supabase_realtime;
+    create table cron.job(jobid bigserial primary key, jobname text, schedule text,
+      command text, active boolean default true);
+    create function cron.schedule(text,text,text) returns bigint language sql as $$
+      insert into cron.job(jobname,schedule,command) values ($1,$2,$3) returning jobid
+    $$;
+    create function cron.unschedule(bigint) returns boolean language sql as $$
+      with removed as (delete from cron.job where jobid=$1 returning 1)
+      select exists(select 1 from removed)
+    $$;
+    create function extensions.gen_random_bytes(integer) returns bytea language sql as $$
+      select decode(repeat('ab',$1),'hex')
+    $$;
+    create function net.http_post(url text, headers jsonb, body jsonb,
+      timeout_milliseconds integer) returns bigint language sql as $$ select 1::bigint $$;
+  `);
+  await db.exec(read('supabase/schema.sql').replace(/^create extension[^;]*;/gm, ''));
   await db.exec(read('supabase/seed-event.sql'));
   await db.exec(migration);
-  const resetSource = read('supabase/20261027_final_cleanup.sql');
-  await db.exec(resetSource.slice(resetSource.indexOf('create or replace function public.reset_total_test()'),
-    resetSource.indexOf('-- Reduce timing drift')));
   await db.exec(`insert into auth.users(id) values ('${organizerId}'),('${hunterId}'),('${targetId}');
     insert into public.participants(id,event_id,pseudo,role,user_id) values
     ('${organizerId}','${eventId}','Organisateur','organizer','${organizerId}'),
@@ -240,5 +247,36 @@ test('push titles use the actual matching target slots for all required hunter p
     .replace(/(\d+):/g,'"$1":').replace(/^/,'{').replace(/$/,'}'));
   for (const [ordinal, offset] of Object.entries(mapping)) {
     assert.equal((await query(`select public.ping_offset_minutes(${Number(ordinal)}) as minutes`))[0].minutes, offset);
+  }
+});
+
+
+test('consolidated installation configures all cron jobs, Realtime and dispatch token', async () => {
+  assert.deepEqual((await query('select jobname from cron.job where active order by jobname'))
+    .map(row => row.jobname), ['chasse_push_dispatch','evasion_capture_release',
+      'evasion_extraction_reveal','evasion_finish_events']);
+  assert.deepEqual((await query("select tablename from pg_publication_tables where pubname='supabase_realtime' order by tablename"))
+    .map(row => row.tablename), ['events','hunter_pings','pings']);
+  const [config] = await query("select length(value) as length from public.app_private_config where key='push_dispatch_token'");
+  assert.equal(config.length, 64);
+});
+
+test('every RPC referenced by the loaded application scripts exists in the consolidated schema', async () => {
+  const html = read('index.html');
+  const scripts = [...html.matchAll(/src="(assets\/[^"?]+\.js)(?:\?[^"]*)?"/g)].map(match => match[1]);
+  const rpcNames = new Set(scripts.flatMap(file => [...read(file).matchAll(/\.rpc\(["'](\w+)["']/g)].map(match => match[1])));
+  const installed = new Set((await query("select proname from pg_proc where pronamespace='public'::regnamespace"))
+    .map(row => row.proname));
+  for (const name of rpcNames) assert.ok(installed.has(name), `Missing RPC: ${name}`);
+});
+
+test('server-only RPCs and private tables remain inaccessible to player roles', async () => {
+  for (const name of ['dispatch_due_push_jobs','claim_due_push_jobs','finish_due_events','reveal_due_extraction_zones']) {
+    const [access] = await query(`select has_function_privilege('authenticated','public.${name}()','execute') as allowed`);
+    assert.equal(access.allowed, false, name);
+  }
+  for (const name of ['access_codes','app_private_config','push_subscriptions','push_jobs','push_deliveries','hunter_pings','hunter_required_pings']) {
+    const [access] = await query(`select has_table_privilege('authenticated','public.${name}','select') as allowed`);
+    assert.equal(access.allowed, false, name);
   }
 });

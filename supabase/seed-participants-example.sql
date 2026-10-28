@@ -9,7 +9,7 @@ with p as (
   returning id
 )
 insert into public.access_codes (participant_id, code_hash)
-select id, encode(digest('ORGA-CHANGE-MOI','sha256'),'hex') from p
+select id, encode(extensions.digest('ORGA-CHANGE-MOI','sha256'),'hex') from p
 on conflict (participant_id) do update set code_hash=excluded.code_hash;
 
 with p as (
@@ -19,7 +19,7 @@ with p as (
   returning id
 )
 insert into public.access_codes (participant_id, code_hash)
-select id, encode(digest('ALPHA-CHANGE-MOI','sha256'),'hex') from p
+select id, encode(extensions.digest('ALPHA-CHANGE-MOI','sha256'),'hex') from p
 on conflict (participant_id) do update set code_hash=excluded.code_hash;
 
 with p as (
@@ -29,5 +29,6 @@ with p as (
   returning id
 )
 insert into public.access_codes (participant_id, code_hash)
-select id, encode(digest('ROUGE1-CHANGE-MOI','sha256'),'hex') from p
+select id, encode(extensions.digest('ROUGE1-CHANGE-MOI','sha256'),'hex') from p
 on conflict (participant_id) do update set code_hash=excluded.code_hash;
+
