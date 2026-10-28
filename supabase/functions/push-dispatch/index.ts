@@ -160,7 +160,8 @@ Deno.serve(async (req: Request) => {
               subscriber: "https://bwallic.github.io/evasion-urbaine-poitiers/",
               ttl: 1800,
               urgency: "high",
-              topic: `prisoner-${prisonerId}`,
+              // A UUID without separators fits the 32-character Web Push Topic limit.
+              topic: prisonerId.replace(/-/g, ""),
             }
           );
           results.push({ participantId: participant.id, status: "sent" });
@@ -367,3 +368,4 @@ Deno.serve(async (req: Request) => {
     return json({ error: String(error?.message ?? error) }, 500);
   }
 });
+

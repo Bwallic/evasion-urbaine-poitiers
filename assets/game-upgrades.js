@@ -830,17 +830,37 @@
     updateManagerTabs();
   }
 
-  async function refreshPlayerManager() {
+  function hasPlayerManagerDrafts(list) {
+    return [...list.querySelectorAll(".player-editor")].some((editor) => {
+      const row = managerRows.find((item) => item.id === editor.dataset.playerId);
+      if (!row) return false;
+      return editor.querySelector('[data-field="pseudo"]').value !== row.pseudo
+        || editor.querySelector('[data-field="role"]').value !== row.role
+        || editor.querySelector('[data-field="active"]').checked !== row.active
+        || editor.querySelector('[data-field="code"]').value.trim() !== "";
+    });
+  }
+
+  async function refreshPlayerManager(automatic = false) {
     if (managerRefreshBusy || !participant || participant.role !== "organizer" || !client()) return;
+    const game = document.getElementById("gameView");
+    if (automatic === true && (document.hidden || !game || game.classList.contains("hidden"))) return;
     const list = document.getElementById("playerManagerList");
     if (!list) return;
+    const participantId = participant.id;
     managerRefreshBusy = true;
     try {
       const { data, error } = await client().rpc("organizer_manage_list");
       if (error) throw error;
+      if (participant?.id !== participantId) return;
+      // Recheck after the request: edits may have begun while it was in flight.
+      if (automatic === true && (document.hidden || game.classList.contains("hidden")
+        || list.contains(document.activeElement) || hasPlayerManagerDrafts(list))) return;
+      if (automatic === true && JSON.stringify(data || []) === JSON.stringify(managerRows)) return;
       managerRows = data || [];
       renderPlayerManagerList();
     } catch (e) {
+      if (automatic === true) return;
       list.innerHTML = `<span class="muted">${escapeHtml(e.message || "Liste indisponible.")}</span>`;
     } finally { managerRefreshBusy = false; }
   }
@@ -889,10 +909,14 @@
     refreshEventState();
   });
 
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) refreshEventState();
-  });
-  window.addEventListener("focus", refreshEventState);
+  function refreshVisibleState() {
+    if (document.hidden) return;
+    refreshEventState();
+    refreshPlayerManager(true);
+  }
+
+  document.addEventListener("visibilitychange", refreshVisibleState);
+  window.addEventListener("focus", refreshVisibleState);
 
   window.addEventListener("evasion:logout", () => {
     participant = null;
@@ -918,7 +942,7 @@
 
   setInterval(setup,1000);
   setInterval(() => { renderGlobalTimer(); renderHunterDepartureTimer(); renderTargetCaptureCountdown(); },1000);
-  setInterval(refreshEventState,60000);
+  setInterval(refreshVisibleState,60000);
   setInterval(() => {
     if (document.hidden) return;
     const game = document.getElementById("gameView");
@@ -928,3 +952,4 @@
     if (participant?.role === "hunter") refreshHunterPings();
   },15000);
 })();
+
