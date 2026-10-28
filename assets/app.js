@@ -227,7 +227,7 @@
     state.participants = data.participants;
     state.pings = data.pings;
     state.activeExtractionKey = data.activeExtractionKey;
-    state.slots = cfg.PING_TIMES.map((label, i) => ({ id: `demo-slot-${i + 1}`, label, ordinal: i + 1, scheduled_at: `${cfg.EVENT_DATE}T${label}:00+01:00` }));
+    state.slots = cfg.PING_TIMES.map((label, i) => ({ id: `demo-slot-${i}`, label: `Ping ${i}`, ordinal: i, scheduled_at: `${cfg.EVENT_DATE}T${label}:00+01:00` }));
   }
 
   function latestTargetPings() {
@@ -513,3 +513,4 @@
   boot();
   setInterval(renderExtractionControl, 1000);
 })();
+

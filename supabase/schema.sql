@@ -80,11 +80,14 @@ create table if not exists public.hunter_required_pings (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references public.events(id) on delete cascade,
   participant_id uuid not null references public.participants(id) on delete cascade,
+  offset_minutes integer not null default 60
+    constraint hunter_required_pings_offset_minutes_check check (offset_minutes in (60,95,110)),
   lat double precision not null check (lat between -90 and 90),
   lng double precision not null check (lng between -180 and 180),
   accuracy_m double precision,
   sent_at timestamptz not null default now(),
-  unique(event_id, participant_id)
+  constraint hunter_required_pings_event_participant_offset_key
+    unique(event_id, participant_id, offset_minutes)
 );
 
 create index if not exists hunter_required_pings_event_idx on public.hunter_required_pings(event_id, sent_at desc);
@@ -324,3 +327,4 @@ begin
     alter publication supabase_realtime add table public.events;
   end if;
 end $$;
+
