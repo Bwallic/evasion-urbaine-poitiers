@@ -280,3 +280,23 @@ test('server-only RPCs and private tables remain inaccessible to player roles', 
     assert.equal(access.allowed, false, name);
   }
 });
+
+
+test('the target status and submit RPC select the same current slot after missed earlier pings', async () => {
+  await db.exec(`update public.events set status='live',
+    actual_started_at=clock_timestamp()-interval '95 minutes',
+    actual_ends_at=clock_timestamp()+interval '25 minutes';
+    update public.ping_slots s set scheduled_at=e.actual_started_at+
+      make_interval(mins=>public.ping_offset_minutes(s.ordinal))
+    from public.events e where e.id=s.event_id;`);
+  const [current]=await asParticipant(targetId, 'select * from public.my_next_ping_status()');
+  assert.equal(current.slot_label,'Ping 7');
+  const [sent]=await asParticipant(targetId,
+    'select * from public.submit_ping_guarded(46.58,0.34,10)');
+  assert.equal(sent.slot_id,current.slot_id);
+  assert.equal(sent.valid_window,true);
+  const [recovery]=await asParticipant(targetId, 'select * from public.my_next_ping_status()');
+  // After the current slot, the server offers the most recent missed slot,
+  // excluding the expired Ping 0. The UI must display that exact server choice.
+  assert.equal(recovery.slot_label,'Ping 6');
+});

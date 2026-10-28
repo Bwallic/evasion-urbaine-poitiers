@@ -288,18 +288,9 @@
 
   async function refreshTargetTiming() {
     const panel = document.getElementById("targetPanel");
-    const client = window.CHASSE_LIVE_CLIENT;
-    if (!panel || panel.classList.contains("hidden") || !client) return;
-
-    const { data, error } = await client.rpc("my_next_ping_status");
-    if (error) {
-      targetTiming = { error: error.message };
-      renderTargetCountdown();
-      return;
-    }
-
-    targetTiming = Array.isArray(data) ? data[0] : data;
-    renderTargetCountdown();
+    if (!panel || panel.classList.contains("hidden")) return;
+    // app.js owns the server snapshot used by both the label and this countdown.
+    await window.CHASSE_REFRESH_TARGET_TIMING?.();
   }
 
   async function refreshHunterTiming() {
@@ -322,7 +313,6 @@
     const box = document.getElementById("pingCountdownBox");
     const main = document.getElementById("pingCountdownMain");
     const sub = document.getElementById("pingCountdownSub");
-    const button = document.getElementById("sendPingBtn");
     if (!box || !main || !sub) return;
 
     box.classList.remove("overdue", "waiting");
@@ -344,7 +334,6 @@
     if (targetTiming.event_status === "finished") {
       main.textContent = "PARTIE TERMINÉE";
       sub.textContent = "Aucun autre ping à envoyer.";
-      if (button) button.disabled = true;
       return;
     }
 
@@ -352,14 +341,12 @@
       box.classList.add("waiting");
       main.textContent = "EN ATTENTE DU START";
       sub.textContent = "Le compte à rebours commencera au lancement de la partie.";
-      if (button) button.disabled = true;
       return;
     }
 
     if (targetTiming.all_sent) {
-      main.textContent = "TOUS LES PINGS ONT ÉTÉ ENVOYÉS";
+      main.textContent = "AUCUN AUTRE PING DISPONIBLE";
       sub.textContent = "Aucun autre ping obligatoire pour le moment.";
-      if (button) button.disabled = true;
       return;
     }
 
@@ -368,12 +355,10 @@
     if (diff >= 0) {
       main.textContent = `DANS ${formatDuration(diff)}`;
       sub.textContent = `${targetTiming.slot_label} prévu à ${formatClock(targetTiming.scheduled_at)}.`;
-      if (button) button.disabled = false;
     } else {
       box.classList.add("overdue");
       main.textContent = `DÉPASSÉ DE ${formatDuration(diff)}`;
       sub.textContent = `${targetTiming.slot_label} devait être envoyé à ${formatClock(targetTiming.scheduled_at)}.`;
-      if (button) button.disabled = false;
     }
   }
 
@@ -430,6 +415,16 @@
     }
   }
 
+  window.addEventListener("evasion:target-timing-updated", (event) => {
+    targetTiming = event.detail;
+    renderTargetCountdown();
+  });
+
+  window.addEventListener("evasion:logout", () => {
+    targetTiming = null;
+    hunterTiming = null;
+  });
+
   window.addEventListener("evasion:event-updated", () => {
     refreshRuntimeStatus();
     refreshTargetTiming();
@@ -457,3 +452,4 @@
     if (hunterPanel && !hunterPanel.classList.contains("hidden")) refreshHunterTiming();
   }, 30000);
 })();
+

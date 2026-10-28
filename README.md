@@ -96,6 +96,8 @@ La base utilise **11 créneaux Cibles** : Ping 0 au START, puis +20, +30, +40, +
 | Révélation extraction | 80 min | 21:20 |
 | Fin | 120 min | 22:00 |
 
+Le libellé « prochain ping », son compte à rebours et l’envoi automatique utilisent le même état serveur (`my_next_ping_status`). Après un oubli, le serveur privilégie le créneau dans la fenêtre actuelle, puis le créneau manqué le plus récent ; Ping 0 n’est plus proposé après cinq minutes.
+
 `start_event_now()` recalcule les créneaux depuis `actual_started_at`. Les heures du seed sont théoriques : un START retardé décale tout le planning et la fin. Les RESET utilisent le même calcul des décalages.
 
 `sent_at` vient de l’horloge du serveur. La fenêtre normale est ±60 secondes. Les pings Cibles ordinaires hors fenêtre sont conservés et signalés à l’organisateur après confirmation ; le calcul actuel utilise un écart arrondi à la seconde. Exception : Ping 0 est un contrôle accepté jusqu’à cinq minutes après le START. Les pings obligatoires Chasseurs utilisent l’écart exact et sont refusés hors fenêtre.

@@ -13,7 +13,10 @@
     participants: [],
     slots: [],
     realtime: [],
-    refreshTimer: null
+    refreshTimer: null,
+    targetTiming: null,
+    targetTimingRequest: 0,
+    pingSending: false
   };
 
   const $ = (id) => document.getElementById(id);
@@ -131,6 +134,8 @@
         participant = ensureDemoParticipant(state.selectedRole, pseudo);
       }
       if (participant.role !== state.selectedRole) throw new Error(`Ce code correspond au rôle ${roleNames[participant.role] || participant.role}.`);
+      state.targetTiming = null;
+      state.targetTimingRequest++;
       state.participant = participant;
       window.CHASSE_PARTICIPANT = participant;
       await enterGame();
@@ -212,7 +217,8 @@
       state.supabase.from("participants").select("id,event_id,pseudo,role,team,active").eq("event_id", cfg.EVENT_ID).eq("active", true),
       state.supabase.from("ping_slots").select("id,event_id,label,scheduled_at,ordinal").eq("event_id", cfg.EVENT_ID).order("ordinal"),
       state.supabase.from("pings").select("id,event_id,participant_id,slot_id,lat,lng,accuracy_m,sent_at,valid_window,delta_seconds").eq("event_id", cfg.EVENT_ID).order("sent_at"),
-      state.supabase.from("events").select("id,active_extraction_key,status,actual_started_at,actual_ends_at").eq("id", cfg.EVENT_ID).single()
+      state.supabase.from("events").select("id,active_extraction_key,status,actual_started_at,actual_ends_at").eq("id", cfg.EVENT_ID).single(),
+      refreshTargetTiming()
     ]);
     for (const r of [partsRes, slotsRes, pingsRes, eventRes]) if (r.error) throw r.error;
     state.participants = partsRes.data || [];
@@ -264,21 +270,53 @@
   function renderTargetPanel() {
     renderPingList("targetPingList");
     const mine = state.pings.filter((p) => p.participant_id === state.participant.id);
+    const button = $("sendPingBtn");
+    $("pingStatusChip").textContent = `${mine.length}/${state.slots.length} envoyé(s)`;
+    $("pingStatusChip").className = "badge badge-muted";
+
+    if (isLive()) {
+      const timing = state.targetTiming;
+      let label = "Synchronisation…";
+      if (timing?.error) label = "État indisponible";
+      else if (timing?.event_status === "finished") label = "Partie terminée";
+      else if (timing && timing.event_status !== "live") label = "En attente du START";
+      else if (timing?.all_sent) {
+        label = mine.length === state.slots.length ? "Tous les pings envoyés" : "Aucun autre ping disponible";
+        if (mine.length === state.slots.length) $("pingStatusChip").className = "badge badge-green";
+      } else if (timing?.slot_id) label = timing.slot_label;
+      $("nextPingText").textContent = label;
+      button.disabled = state.pingSending || !timing || !!timing.error ||
+        timing.event_status !== "live" || timing.all_sent || !timing.slot_id || !timing.scheduled_at;
+      return;
+    }
+
     const sentSlotIds = new Set(mine.map((p) => p.slot_id));
     const next = state.slots.find((s) => !sentSlotIds.has(s.id));
-    const button = $("sendPingBtn");
-    if (!next) {
-      $("nextPingText").textContent = "Tous les pings envoyés";
-      $("pingStatusChip").textContent = `${mine.length}/${state.slots.length}`;
-      $("pingStatusChip").className = "badge badge-green";
-      button.disabled = true;
-    } else {
-      $("nextPingText").textContent = next.label;
-      $("pingStatusChip").textContent = `${mine.length}/${state.slots.length} envoyé(s)`;
-      $("pingStatusChip").className = "badge badge-muted";
-      button.disabled = false;
-    }
+    $("nextPingText").textContent = next ? next.label : "Tous les pings envoyés";
+    if (!next) $("pingStatusChip").className = "badge badge-green";
+    button.disabled = state.pingSending || !next;
   }
+
+  async function refreshTargetTiming() {
+    const participant = state.participant;
+    if (!isLive() || participant?.role !== "target") return null;
+    const request = ++state.targetTimingRequest;
+    let timing;
+    try {
+      const { data, error } = await state.supabase.rpc("my_next_ping_status");
+      timing = error ? { error: error.message } : (Array.isArray(data) ? data[0] : data);
+    } catch (error) {
+      timing = { error: error.message || "Synchronisation indisponible." };
+    }
+    if (state.participant?.id !== participant.id) return null;
+    if (request !== state.targetTimingRequest) return null;
+    state.targetTiming = timing || { error: "Synchronisation indisponible." };
+    renderTargetPanel();
+    window.dispatchEvent(new CustomEvent("evasion:target-timing-updated", { detail: state.targetTiming }));
+    return state.targetTiming;
+  }
+
+  window.CHASSE_REFRESH_TARGET_TIMING = refreshTargetTiming;
 
   function renderHunterPanel() {
     renderPingList("hunterPingList");
@@ -375,6 +413,8 @@
   }
 
   async function sendPing() {
+    if (state.pingSending || state.participant?.role !== "target") return;
+    state.pingSending = true;
     const btn = $("sendPingBtn");
     btn.disabled = true;
     $("geoMessage").textContent = "Localisation GPS en cours…";
@@ -403,7 +443,8 @@
       const msg = e.code === 1 ? "Autorisation de localisation refusée." : e.code === 2 ? "Position GPS indisponible." : e.code === 3 ? "Délai GPS dépassé." : (e.message || "Impossible d'envoyer le ping.");
       $("geoMessage").textContent = msg;
     } finally {
-      btn.disabled = false;
+      state.pingSending = false;
+      if (state.participant?.role === "target") renderTargetPanel();
     }
   }
 
@@ -472,6 +513,8 @@
   function logout() {
     unsubscribeRealtime();
     state.participant = null;
+    state.targetTiming = null;
+    state.targetTimingRequest++;
     state.selectedRole = null;
     window.CHASSE_PARTICIPANT = null;
     window.dispatchEvent(new CustomEvent("evasion:logout"));

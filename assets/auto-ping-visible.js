@@ -19,11 +19,8 @@
 
     checkInFlight = true;
     try {
-      const { data, error } = await client.rpc("my_next_ping_status");
-      if (error) return;
-
-      const row = Array.isArray(data) ? data[0] : data;
-      if (!row || row.event_status !== "live" || row.all_sent || !row.slot_id || !row.scheduled_at) return;
+      const row = await window.CHASSE_REFRESH_TARGET_TIMING?.();
+      if (button.disabled || !row || row.event_status !== "live" || row.all_sent || !row.slot_id || !row.scheduled_at) return;
 
       const dueAt = new Date(row.scheduled_at).getTime();
       const now = Date.now();
@@ -57,3 +54,4 @@
     maybeSendAutomaticPing().catch(() => {});
   }, 10000);
 })();
+
