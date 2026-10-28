@@ -156,14 +156,6 @@
       return;
     }
 
-    if (
-      Notification.permission === "granted" &&
-      button.disabled &&
-      button.textContent === "NOTIFICATIONS ACTIVES"
-    ) {
-      return;
-    }
-
     try {
       const registration = await getRegistration();
       const subscription = await registration.pushManager.getSubscription();
@@ -347,3 +339,4 @@
   refreshVisibleNotificationUI();
   setInterval(refreshVisibleNotificationUI, 30000);
 })();
+
